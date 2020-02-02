@@ -5,31 +5,47 @@
 #include <condition_variable>
 #include <chrono>
 #include <functional>
-
+#include <vector>
+#include <sstream>
 
 #include "Threadpool.hpp"
 
 
-void Threadpool::CreateThreads() {
-	int i=0;
+Threadpool::Threadpool(string name, uint32_t n_threads){
+       	name_ = name;
+	n_threads_ = n_threads;
+	threads_.reserve(n_threads_);
+	cout << "number of cores:" << n_threads_ << endl;
+}
+
+
+Threadpool::~Threadpool() {
+
+	std::unique_lock<std::mutex> lock(mutex_);
+	running_ = false;
+	lock.unlock();
+
+	cv_.notify_all();
+
+	uint32_t i = 0;
 	while (i < n_threads_) {
-		std::thread(EventLoop);
+		if (threads_[i].joinable()) {
+		       threads_[i].join();	
+		}
 		i++;
 	}
 }
 
-Threadpool::Threadpool(string name, uint32_t n_threads){
-       	name_ = name;
-	n_threads_ = n_threads;
-	cout << "hd cores:" << n_threads_ << endl;
-	//1. create n_threads
-	//2. wait in event loop
-	CreateThreads();
-	EventLoop();
+void Threadpool::CreateThreads() {
+	int i=0;
+	while (i < n_threads_) {
+		threads_[i] = std::thread(&Threadpool::EventLoop, this);
+		i++;
+	}
 }
 
 
-void Threadpool::Execute(std::function<void (void *)> fn) {
+void Threadpool::Execute(fnptr fn) {
 	std::unique_lock<std::mutex> lock(mutex_);
 	q_.push(std::move(fn));
 	lock.unlock();
@@ -37,37 +53,37 @@ void Threadpool::Execute(std::function<void (void *)> fn) {
 }
 
 
-void Threadpool::EventLoop() {
-	
-	cout << "in eventloop" << endl;
+void Threadpool::EventLoop(void) {
 	std::unique_lock<std::mutex> lock(mutex_);
-	while (true) {
-		if (not q_.size()) {
-			cv_.wait(lock, [this]{ return (q_.size()!=0); });
-		}
-
-		if (q_.size()) {
-			cout << "popped ele from q" << endl;
-			auto fn = q_.front();
+	while (running_) {
+		cv_.wait(lock, [this]{ return (q_.size() || running_==false); });
+		if (q_.size() and running_) {
+			auto fn = std::move(q_.front());
 			q_.pop();
-			fn;
 			lock.unlock();
+			fn();
+			lock.lock();
 		}
 	}
 }
 
 
-void PrintTime(void* data) {
-	cout << "inside " << __func__;
-	cout << data;
+void PrintTime(void) {
 	auto time_point = chrono::high_resolution_clock::now();
-	cout << time_point.time_since_epoch().count() << endl; 
+	std::stringstream t;
+	t << std::this_thread::get_id() << ":::" << time_point.time_since_epoch().count() << endl; 
+	cout << t.str();
 }
 
 
 int main(int argc, char* argv[]) {
 	Threadpool tp("default", std::thread::hardware_concurrency());
+	tp.CreateThreads();
 	tp.Execute(PrintTime);
+	tp.Execute(PrintTime);
+	tp.Execute(PrintTime);
+	tp.Execute(PrintTime);
+	tp.Execute(PrintTime);
+	std::this_thread::sleep_for(std::chrono::seconds(1));
 	return 0;
 }
-
