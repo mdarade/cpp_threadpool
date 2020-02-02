@@ -1,2 +1,6 @@
-# cpp_threadpool
-threadpool in c++ 17
+#How to compile
+g++ -o Threadpool -g Threadpool.cpp -l pthread
+
+#How to run
+./Threadpool
+
